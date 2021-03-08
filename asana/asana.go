@@ -82,7 +82,7 @@ func runGetter(i interface{}, suffix string, fields ...string) error {
 }
 
 type Basic struct {
-	Id    uint64 `json:"id"`
+	Id    uint64 `json:"gid"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }
