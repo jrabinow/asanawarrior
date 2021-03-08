@@ -29,7 +29,7 @@ var bucketName = []byte("aw")
 var notify *notificator.Notificator
 
 type Match struct {
-	Xid    uint64
+	Xid    string
 	Asana  x.WarriorTask
 	TaskWr x.WarriorTask
 }
@@ -44,7 +44,7 @@ var notifications = make(chan notification, 100)
 // generateMatches matches all tasks from Asana to Taskwarrior, and stores non-matches as
 // individual entries from each, without the other being present.
 func generateMatches(atasks []x.WarriorTask, twtasks []x.WarriorTask) []*Match {
-	amap := make(map[uint64]*Match)
+	amap := make(map[string]*Match)
 	for _, at := range atasks {
 		m := &Match{
 			Xid:   at.Xid,
@@ -82,8 +82,8 @@ func approxAfter(t1, t2 time.Time) bool {
 	return t1.Sub(t2) > time.Second
 }
 
-func asanaKey(xid uint64) []byte {
-	return []byte(fmt.Sprintf("asana-%d", xid))
+func asanaKey(xid string) []byte {
+	return []byte(fmt.Sprintf("asana-%s", xid))
 }
 
 func taskwKey(uuid string) []byte {
@@ -108,7 +108,7 @@ func storeInDb(asanaTask, twTask x.WarriorTask) {
 	}
 }
 
-func getSyncTimestamps(xid uint64, uuid string) (time.Time, time.Time) {
+func getSyncTimestamps(xid string, uuid string) (time.Time, time.Time) {
 	var at, tt time.Time
 	db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketName)
@@ -127,10 +127,10 @@ func getSyncTimestamps(xid uint64, uuid string) (time.Time, time.Time) {
 }
 
 func syncMatch(m *Match, deleteFromAsana *[]*Match) error {
-	if m.Xid == 0 {
+	if m.Xid == "" {
 		// Task not present in Asana, but present in TW.
 
-		if m.TaskWr.Xid > 0 {
+		if m.TaskWr.Xid != "" {
 			if m.TaskWr.Deleted {
 				// Already deleted from TW. Do nothing.
 				return nil
@@ -169,7 +169,7 @@ func syncMatch(m *Match, deleteFromAsana *[]*Match) error {
 		return nil
 	}
 
-	if m.TaskWr.Xid == 0 {
+	if m.TaskWr.Xid == "" {
 		// No Asana xid found in Taskwarrior. So, create it.
 
 		fmt.Printf("Create in Taskwarrior: [%q]\n", m.Asana.Name)

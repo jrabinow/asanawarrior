@@ -7,7 +7,6 @@ import (
 	"log"
 	"os/exec"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/manishrjain/asanawarrior/x"
@@ -74,11 +73,6 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 		}
 	}
 
-	xid, err := strconv.ParseUint(t.Xid, 10, 64)
-	if err != nil {
-		xid = 0
-	}
-
 	wt := x.WarriorTask{
 		Assignee: ass,
 		Created:  cts,
@@ -87,7 +81,7 @@ func (t task) ToWarriorTask() (x.WarriorTask, error) {
 		Project:  t.Project,
 		Section:  sec,
 		Tags:     tags,
-		Xid:      xid,
+		Xid:      t.Xid,
 		Uuid:     t.Uuid,
 		Deleted:  t.Status == "deleted",
 	}
@@ -162,7 +156,7 @@ func createNew(wt x.WarriorTask) task {
 		Project:     wt.Project,
 		Status:      status,
 		Tags:        tags,
-		Xid:         strconv.FormatUint(wt.Xid, 10),
+		Xid:         wt.Xid,
 	}
 	if !wt.Completed.IsZero() {
 		t.Completed = wt.Completed.Format(stamp)

@@ -11,7 +11,7 @@ type WarriorTask struct {
 	Project   string
 	Section   string
 	Tags      []string
-	Xid       uint64
+	Xid       string
 	Uuid      string
 
 	// TaskWarrior

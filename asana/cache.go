@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -19,13 +18,13 @@ type asection struct {
 type acache struct {
 	sync.RWMutex
 	workspaces  []Basic
-	defaultWork uint64
+	defaultWork string
 	projects    []Basic
 	tags        []Basic
 	users       []Basic
-	tagmap      map[uint64]string
-	usermap     map[uint64]string
-	sections    map[uint64]*asection
+	tagmap      map[string]string
+	usermap     map[string]string
+	sections    map[string]*asection
 }
 
 func printBasics(title string, bs []Basic) {
@@ -33,9 +32,9 @@ func printBasics(title string, bs []Basic) {
 
 	for _, b := range bs {
 		if len(b.Email) > 0 {
-			fmt.Printf("%9s %16s %s\n", title, strconv.FormatUint(b.Id, 10), b.Email)
+			fmt.Printf("%9s %16s %s\n", title, b.Id, b.Email)
 		} else {
-			fmt.Printf("%9s %16s %s\n", title, strconv.FormatUint(b.Id, 10), b.Name)
+			fmt.Printf("%9s %16s %s\n", title, b.Id, b.Name)
 		}
 	}
 	fmt.Println()
@@ -48,7 +47,7 @@ func (c *acache) updateTags() error {
 	if err != nil {
 		return err
 	}
-	c.tagmap = make(map[uint64]string)
+	c.tagmap = make(map[string]string)
 	for _, t := range c.tags {
 		c.tagmap[t.Id] = t.Name
 	}
@@ -71,11 +70,11 @@ func (c *acache) update() error {
 			c.defaultWork = w.Id
 		}
 	}
-	if c.defaultWork == 0 {
+	if c.defaultWork == "" {
 		log.Fatalf("Unable to find [%q] domain. Found: %+v", *domain, c.workspaces)
 	}
 
-	c.projects, err = getVarious("workspaces/"+(strconv.Itoa(int(c.defaultWork)))+"/projects", "name")
+	c.projects, err = getVarious("workspaces/"+c.defaultWork+"/projects", "name")
 	if err != nil {
 		return errors.Wrap(err, "projects")
 	}
@@ -94,16 +93,16 @@ func (c *acache) update() error {
 		email := strings.Split(u.Email, "@")
 		u.Email = email[0]
 	}
-	c.usermap = make(map[uint64]string)
+	c.usermap = make(map[string]string)
 	for _, u := range c.users {
 		c.usermap[u.Id] = u.Email
 	}
 	printBasics("User", c.users)
-	c.sections = make(map[uint64]*asection)
+	c.sections = make(map[string]*asection)
 	return nil
 }
 
-func (c *acache) Workspace() uint64 {
+func (c *acache) Workspace() string {
 	c.RLock()
 	defer c.RUnlock()
 	return c.defaultWork
@@ -117,7 +116,7 @@ func (c *acache) Projects() []Basic {
 	return projects
 }
 
-func (c *acache) ProjectId(name string) uint64 {
+func (c *acache) ProjectId(name string) string {
 	c.RLock()
 	defer c.RUnlock()
 	for _, p := range c.projects {
@@ -125,16 +124,16 @@ func (c *acache) ProjectId(name string) uint64 {
 			return p.Id
 		}
 	}
-	return 0
+	return ""
 }
 
-func (c *acache) User(uid uint64) string {
+func (c *acache) User(uid string) string {
 	c.RLock()
 	defer c.RUnlock()
 	return c.usermap[uid]
 }
 
-func (c *acache) UserId(email string) uint64 {
+func (c *acache) UserId(email string) string {
 	c.RLock()
 	defer c.RUnlock()
 	for _, u := range c.users {
@@ -142,16 +141,16 @@ func (c *acache) UserId(email string) uint64 {
 			return u.Id
 		}
 	}
-	return 0
+	return ""
 }
 
-func (c *acache) Tag(uid uint64) string {
+func (c *acache) Tag(uid string) string {
 	c.RLock()
 	defer c.RUnlock()
 	return c.tagmap[uid]
 }
 
-func (c *acache) TagId(tname string) uint64 {
+func (c *acache) TagId(tname string) string {
 	c.RLock()
 	c.RUnlock()
 	for _, t := range c.tags {
@@ -159,10 +158,10 @@ func (c *acache) TagId(tname string) uint64 {
 			return t.Id
 		}
 	}
-	return 0
+	return ""
 }
 
-func (c *acache) CreateTag(tname string) uint64 {
+func (c *acache) CreateTag(tname string) string {
 	c.Lock()
 	defer c.Unlock()
 
@@ -174,15 +173,15 @@ func (c *acache) CreateTag(tname string) uint64 {
 	}
 
 	v := url.Values{}
-	v.Add("workspace", strconv.FormatUint(c.defaultWork, 10))
+	v.Add("workspace", c.defaultWork)
 	v.Add("name", tname)
 	resp, err := runPost("POST", "tags", v)
 	if err != nil {
-		return 0
+		return ""
 	}
 	var bdo BasicDataOne
 	if err := json.Unmarshal(resp, &bdo); err != nil {
-		return 0
+		return ""
 	}
 	c.tags = append(c.tags, bdo.Data)
 	c.tagmap[bdo.Data.Id] = bdo.Data.Name
@@ -190,7 +189,7 @@ func (c *acache) CreateTag(tname string) uint64 {
 	return bdo.Data.Id
 }
 
-func (c *acache) AddSection(projId uint64, sec Basic) string {
+func (c *acache) AddSection(projId string, sec Basic) string {
 	c.Lock()
 	defer c.Unlock()
 	s, found := c.sections[projId]
@@ -220,7 +219,7 @@ func (c *acache) AddSection(projId uint64, sec Basic) string {
 	return sec.Name
 }
 
-func (c *acache) SectionName(projId uint64, secId uint64) string {
+func (c *acache) SectionName(projId string, secId string) string {
 	c.RLock()
 	defer c.RUnlock()
 	s, found := c.sections[projId]
@@ -235,17 +234,17 @@ func (c *acache) SectionName(projId uint64, secId uint64) string {
 	return ""
 }
 
-func (c *acache) SectionId(projId uint64, sectionName string) uint64 {
+func (c *acache) SectionId(projId string, sectionName string) string {
 	c.RLock()
 	defer c.RUnlock()
 	s, found := c.sections[projId]
 	if !found {
-		return 0
+		return ""
 	}
 	for _, l := range s.list {
 		if l.Name == sectionName {
 			return l.Id
 		}
 	}
-	return 0
+	return ""
 }

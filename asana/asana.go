@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -82,7 +81,7 @@ func runGetter(i interface{}, suffix string, fields ...string) error {
 }
 
 type Basic struct {
-	Id    uint64 `json:"gid"`
+	Id    string `json:"gid"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }
@@ -162,7 +161,7 @@ func convert(tsk task, proj, section string) (x.WarriorTask, error) {
 func getTasks(proj Basic, out chan x.WarriorTask, errc chan error) {
 	var sectionName string
 	var t tasks
-	if err := runGetter(&t, fmt.Sprintf("projects/%d/tasks", proj.Id),
+	if err := runGetter(&t, fmt.Sprintf("projects/%s/tasks", proj.Id),
 		"assignee,name,tags,completed_at,modified_at,created_at"); err != nil {
 		errc <- errors.Wrapf(err, "getTasks for project: %v", proj.Name)
 		return
@@ -206,7 +205,7 @@ func GetTasks() ([]x.WarriorTask, error) {
 
 	// Asana can send back the same task multiple times, if it's part of multiple projects.
 	// So, let's dedup them.
-	seen := make(map[uint64]bool)
+	seen := make(map[string]bool)
 	wtasks := make([]x.WarriorTask, 0, 100)
 	done := make(chan struct{})
 	go func() {
@@ -262,34 +261,34 @@ func toTagIds(tnames []string) []string {
 	var tags []string
 	for _, t := range tnames {
 		tid := cache.TagId(t)
-		if tid == 0 {
+		if tid == "" {
 			tid = cache.CreateTag(t)
-			fmt.Printf("New Tag created. ID: %d", tid)
+			fmt.Printf("New Tag created. ID: %s", tid)
 		}
-		if tid > 0 {
-			tags = append(tags, strconv.FormatUint(tid, 10))
+		if tid != "" {
+			tags = append(tags, tid)
 		}
 	}
 	return tags
 }
 
-func removeProject(tid, pid uint64) error {
+func removeProject(tid, pid string) error {
 	v := url.Values{}
-	v.Add("project", strconv.FormatUint(pid, 10))
-	_, err := runPost("POST", fmt.Sprintf("tasks/%d/removeProject", tid), v)
+	v.Add("project", pid)
+	_, err := runPost("POST", fmt.Sprintf("tasks/%s/removeProject", tid), v)
 	return err
 }
 
-func updateSection(tid, pid uint64, section string) error {
+func updateSection(tid, pid string, section string) error {
 	v := url.Values{}
-	v.Add("project", strconv.FormatUint(pid, 10))
+	v.Add("project", pid)
 
 	sid := cache.SectionId(pid, section)
-	if sid > 0 {
-		v.Add("section", strconv.FormatUint(sid, 10))
+	if sid != "" {
+		v.Add("section", sid)
 	}
 
-	_, err := runPost("POST", fmt.Sprintf("tasks/%d/addProject", tid), v)
+	_, err := runPost("POST", fmt.Sprintf("tasks/%s/addProject", tid), v)
 	return err
 }
 
@@ -298,16 +297,16 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 
 	// Ensure that project actually exists before proceeding.
 	pid := cache.ProjectId(wt.Project)
-	if pid == 0 {
+	if pid == "" {
 		return e, fmt.Errorf("Project not found: %v", wt.Project)
 	}
 
 	v := url.Values{}
-	v.Add("workspace", strconv.FormatUint(cache.Workspace(), 10))
+	v.Add("workspace", cache.Workspace())
 	v.Add("name", wt.Name)
 	aid := cache.UserId(wt.Assignee)
-	if aid > 0 {
-		v.Add("assignee", strconv.FormatUint(aid, 10))
+	if aid != "" {
+		v.Add("assignee", aid)
 	}
 	if !wt.Completed.IsZero() {
 		v.Add("completed", "true")
@@ -325,7 +324,7 @@ func AddNew(wt x.WarriorTask) (x.WarriorTask, error) {
 	if err := json.Unmarshal(resp, &ot); err != nil {
 		return e, errors.Wrap(err, "AddNew unmarshal")
 	}
-	if ot.Data.Id == 0 {
+	if ot.Data.Id == "" {
 		return e, fmt.Errorf("Unable to find ID assigned by Asana: %+v", ot.Data)
 	}
 
@@ -366,7 +365,7 @@ func updateOneTag(tagid, taskid, instruction string, errc chan error) {
 }
 
 func updateTags(tw x.WarriorTask, asana x.WarriorTask) error {
-	taskid := strconv.FormatUint(tw.Xid, 10)
+	taskid := tw.Xid
 	add := diff(tw.Tags, asana.Tags)
 	rem := diff(asana.Tags, tw.Tags)
 
@@ -399,8 +398,8 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 	}
 	if tw.Assignee != asana.Assignee {
 		a := cache.UserId(tw.Assignee)
-		if a > 0 {
-			v.Add("assignee", strconv.FormatUint(a, 10))
+		if a != "" {
+			v.Add("assignee", a)
 		}
 	}
 	if !tw.Completed.IsZero() && asana.Completed.IsZero() {
@@ -410,7 +409,7 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 	}
 
 	if len(v) > 0 {
-		resp, err := runPost("PUT", "tasks/"+strconv.FormatUint(tw.Xid, 10), v)
+		resp, err := runPost("PUT", "tasks/"+tw.Xid, v)
 		if err != nil {
 			return errors.Wrap(err, "UpdateAsanaTask")
 		}
@@ -423,7 +422,7 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 
 	// Update project or section if changed.
 	pid := cache.ProjectId(tw.Project)
-	if pid > 0 && (tw.Project != asana.Project || tw.Section != asana.Section) {
+	if pid != "" && (tw.Project != asana.Project || tw.Section != asana.Section) {
 		fmt.Printf("Updating project and section: %v %v\n", tw.Project, tw.Section)
 		if err := updateSection(tw.Xid, pid, tw.Section); err != nil {
 			return errors.Wrap(err, "asana.UpdateTask updateSection")
@@ -433,7 +432,7 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 		}
 		// Project was changed. So, remove the last one.
 		fmt.Printf("Removing from project: %v\n", asana.Project)
-		if previd := cache.ProjectId(asana.Project); previd > 0 {
+		if previd := cache.ProjectId(asana.Project); previd != "" {
 			if err := removeProject(tw.Xid, previd); err != nil {
 				return err
 			}
@@ -442,10 +441,10 @@ func UpdateTask(tw x.WarriorTask, asana x.WarriorTask) error {
 	return nil
 }
 
-func GetOneTask(taskid uint64) (x.WarriorTask, error) {
+func GetOneTask(taskid string) (x.WarriorTask, error) {
 	e := x.WarriorTask{}
 	var ot oneTask
-	if err := runGetter(&ot, "tasks/"+strconv.FormatUint(taskid, 10)); err != nil {
+	if err := runGetter(&ot, "tasks/"+taskid); err != nil {
 		return e, errors.Wrap(err, "AddNew runGetter")
 	}
 
@@ -458,8 +457,8 @@ func GetOneTask(taskid uint64) (x.WarriorTask, error) {
 	return convert(ot.Data, member.Project.Name, sname)
 }
 
-func Delete(taskid uint64) error {
-	url := fmt.Sprintf("%s/tasks/%d", prefix, taskid)
+func Delete(taskid string) error {
+	url := fmt.Sprintf("%s/tasks/%s", prefix, taskid)
 	_, err := runRequest("DELETE", url)
 	return err
 }
